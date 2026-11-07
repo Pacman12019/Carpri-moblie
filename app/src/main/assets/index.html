@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Capri</title>
+<style>
+:root{--bg:#0b0f14;--panel:#141a22;--line:#233040;--fg:#e6edf3;--dim:#8b9bb0;--acc:#5eead4;--me:#1d3b4a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif}
+#app{display:flex;flex-direction:column;height:100%}
+header{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line)}
+header h1{font-size:18px;margin:0;flex:1;letter-spacing:.12em}
+button{font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+button.pri{background:var(--acc);color:#04201c;border:0;font-weight:600}
+/* chip face */
+#face{width:44px;height:44px;border-radius:12px;background:var(--panel);border:2px solid var(--acc);position:relative;flex:none}
+#face i{position:absolute;top:14px;width:7px;height:10px;background:var(--acc);border-radius:2px;animation:blink 4s infinite}
+#face i:nth-child(1){left:10px}#face i:nth-child(2){right:10px}
+#face b{position:absolute;left:14px;right:14px;bottom:9px;height:4px;background:var(--acc);border-radius:2px}
+#face.talk b{animation:talk .25s infinite alternate}
+@keyframes blink{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.1)}}
+@keyframes talk{to{height:10px}}
+#log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:85%;padding:10px 13px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word;line-height:1.4}
+.m.u{align-self:flex-end;background:var(--me)}
+.m.a{align-self:flex-start;background:var(--panel);border:1px solid var(--line)}
+.m.s{align-self:center;color:var(--dim);font-size:13px;text-align:center}
+form{display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+textarea{flex:1;resize:none;max-height:120px;font:inherit;color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+#set{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end}
+#set.on{display:flex}
+#sheet{background:var(--panel);width:100%;max-height:90%;overflow-y:auto;border-radius:18px 18px 0 0;padding:16px;display:flex;flex-direction:column;gap:8px}
+label{font-size:13px;color:var(--dim)}
+input,select,#sheet textarea{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+</style></head>
+<body><div id="app">
+<header><div id="face"><i></i><i></i><b></b></div><h1>CAPRI</h1>
+<button id="spk" title="Speak replies">🔇</button><button id="gear">⚙︎</button></header>
+<div id="log"></div>
+<form id="f"><textarea id="t" rows="1" placeholder="Talk to Capri…"></textarea><button class="pri">Send</button></form>
+</div>
+
+<div id="set"><div id="sheet">
+<b>Brain</b>
+<label>Preset</label>
+<select id="preset">
+<option value="">Custom</option>
+<option value="https://api.openai.com/v1">OpenAI</option>
+<option value="http://192.168.1.50:11434/v1">Ollama on my PC (edit IP)</option>
+<option value="http://192.168.1.50:8080/v1">llama.cpp server on my PC (edit IP)</option>
+<option value="https://openrouter.ai/api/v1">OpenRouter</option>
+</select>
+<label>Base URL (OpenAI-compatible, ends in /v1)</label><input id="base" autocapitalize="off" autocorrect="off">
+<label>Model</label><input id="model" autocapitalize="off" autocorrect="off">
+<label>API key (stays on this phone; optional for local servers)</label><input id="key" type="password" autocapitalize="off">
+<label>Personality</label><textarea id="sys" rows="5"></textarea>
+<div class="row"><button type="button" id="clear">Clear chat</button><button type="button" id="test">Test</button><button type="button" class="pri" id="save">Save</button></div>
+</div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+const DEF={base:'https://api.openai.com/v1',model:'gpt-4o-mini',key:'',speak:false,
+sys:"You are Capri, a small, witty chip-sprite companion living on the user's phone. Be warm, a little playful, and brief. Reply in the user's language."};
+let cfg={...DEF},hist=[];
+try{cfg={...DEF,...JSON.parse(localStorage.capri_cfg||'{}')};hist=JSON.parse(localStorage.capri_hist||'[]')}catch(e){}
+const save=()=>{try{localStorage.capri_cfg=JSON.stringify(cfg);localStorage.capri_hist=JSON.stringify(hist.slice(-60))}catch(e){}};
+
+// Native HTTP bridge (falls back to fetch in a desktop browser)
+const pend={};
+window.__nf=(id,r)=>{const p=pend[id];if(p){delete pend[id];p(JSON.parse(r))}};
+function http(method,url,headers,body){
+  if(window.Android&&Android.http)return new Promise(res=>{const id=Math.random().toString(36).slice(2);pend[id]=res;
+    Android.http(id,method,url,JSON.stringify(headers||{}),body||'')});
+  return fetch(url,{method,headers,body:body||undefined}).then(async r=>({status:r.status,body:await r.text()})).catch(e=>({status:0,body:String(e)}));
+}
+function add(cls,text){const d=document.createElement('div');d.className='m '+cls;d.textContent=text;$('#log').appendChild(d);$('#log').scrollTop=1e9;return d}
+function talk(text){
+  if(!cfg.speak||!window.speechSynthesis)return;
+  const u=new SpeechSynthesisUtterance(text);u.onstart=()=>$('#face').classList.add('talk');
+  u.onend=u.onerror=()=>$('#face').classList.remove('talk');speechSynthesis.cancel();speechSynthesis.speak(u);
+}
+async function ask(msgs){
+  const h={'Content-Type':'application/json'};if(cfg.key)h.Authorization='Bearer '+cfg.key;
+  const r=await http('POST',cfg.base.replace(/\/+$/,'')+'/chat/completions',h,JSON.stringify({model:cfg.model,messages:msgs}));
+  let j;try{j=JSON.parse(r.body)}catch(e){}
+  if(r.status!==200)throw new Error(r.status?('HTTP '+r.status+' '+(j&&j.error&&(j.error.message||j.error)||r.body.slice(0,200))):r.body);
+  return j.choices[0].message.content;
+}
+$('#f').onsubmit=async e=>{
+  e.preventDefault();const t=$('#t').value.trim();if(!t)return;$('#t').value='';
+  add('u',t);hist.push({role:'user',content:t});const w=add('a','…');
+  try{const a=await ask([{role:'system',content:cfg.sys},...hist.slice(-30)]);w.textContent=a;hist.push({role:'assistant',content:a});talk(a)}
+  catch(err){w.className='m s';w.textContent='Couldn’t reach her brain: '+err.message+'\nOpen ⚙︎ to check the address and key.';hist.pop()}
+  save();
+};
+$('#t').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#f').requestSubmit()}});
+const fill=()=>{$('#base').value=cfg.base;$('#model').value=cfg.model;$('#key').value=cfg.key;$('#sys').value=cfg.sys};
+const read=()=>{cfg.base=$('#base').value.trim();cfg.model=$('#model').value.trim();cfg.key=$('#key').value.trim();cfg.sys=$('#sys').value};
+$('#gear').onclick=()=>{fill();$('#set').classList.add('on')};
+$('#set').onclick=e=>{if(e.target.id==='set')$('#set').classList.remove('on')};
+$('#preset').onchange=e=>{if(e.target.value)$('#base').value=e.target.value};
+$('#save').onclick=()=>{read();save();$('#set').classList.remove('on')};
+$('#clear').onclick=()=>{hist=[];save();$('#log').innerHTML='';hello()};
+$('#test').onclick=async()=>{read();try{const a=await ask([{role:'user',content:'Say hi in 3 words.'}]);alert('Works: '+a)}catch(e){alert('Failed: '+e.message)}};
+$('#spk').onclick=()=>{cfg.speak=!cfg.speak;$('#spk').textContent=cfg.speak?'🔊':'🔇';save()};
+function hello(){add('s','Capri online. Tap ⚙︎ to point her at a brain (OpenAI, or Ollama/llama.cpp on your PC).')}
+$('#spk').textContent=cfg.speak?'🔊':'🔇';
+hist.length?hist.forEach(m=>add(m.role==='user'?'u':'a',m.content)):hello();
+</script></body></html>
